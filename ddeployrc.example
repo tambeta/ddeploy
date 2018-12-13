@@ -1,0 +1,9 @@
+DEPLOY_HOST=host.example.com
+DEPLOY_DIR=/directory/on/deployhost
+
+IMAGE_NAME=my/docker_image
+CONTAINER_NAME=my_docker_container
+CONTAINER_PORT_MAP=8080:8080
+CONTAINER_DIR=/directory/in/container
+CONTAINER_RUNNER=run
+
