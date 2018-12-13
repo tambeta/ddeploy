@@ -6,6 +6,7 @@
 #
 # Options:
 #
+# -f - Foreground mode: do not pass `--detach` to `docker run`.
 # -r - Ref to check out and deploy, `master` by default.
 # -q - Quit without attempting to log into the deploy host. This is a guard
 #      flag for internal use against looping indefinitely.
@@ -21,9 +22,11 @@ function err {
 
 function parse_options {
     REF=master
+    DETACH="-d"
     
-    while getopts "lr:q" OPT; do
+    while getopts "fr:q" OPT; do
         case $OPT in
+            f ) unset DETACH  ;;
             r ) REF=$OPTARG  ;;
             q ) QUIT=1 ;;
         esac
@@ -90,8 +93,14 @@ else
     CONTAINER_DIR=${CONTAINER_DIR:-/opt/$CONTAINER_NAME}
     CONTAINER_PORT_CONF=${CONTAINER_PORT_MAP:+\
         -p 127.0.0.1:$CONTAINER_PORT_MAP}
-    CONTAINER_RUNNER_ABS=${CONTAINER_RUNNER:+\
-        $CONTAINER_DIR/$DEPLOY_FILES_DIR/$CONTAINER_RUNNER}
+        
+    if [[ -n "$CONTAINER_RUNNER" ]]; then
+        CONTAINER_RUNNER_ABS=${CONTAINER_RUNNER:+\
+            $CONTAINER_DIR/$DEPLOY_FILES_DIR/$CONTAINER_RUNNER}
+        CMD=${CONTAINER_RUNNER_ABS:+"$CONTAINER_RUNNER_ABS $CONTAINER_DIR"}
+    else
+        CMD="$CONTAINER_CMD"
+    fi
     
     msg "Fetching and checking out $REF"
     pushd $DEPLOY_DIR > /dev/null || exit 1
@@ -107,9 +116,9 @@ else
 
     msg "Starting container" >&2
     sudo docker run --restart unless-stopped --name=$CONTAINER_NAME \
-        $CONTAINER_PORT_CONF -dt -v $DEPLOY_DIR:$CONTAINER_DIR \
+        $CONTAINER_PORT_CONF $DETACH -t -v $DEPLOY_DIR:$CONTAINER_DIR \
         --log-driver json-file --log-opt max-size=100m $IMAGE_NAME \
-        $CONTAINER_RUNNER_ABS "$CONTAINER_DIR"
+        $CMD
         
     exit $?
 fi
