@@ -7,7 +7,7 @@
 # Options:
 #
 # -f - Foreground mode: do not pass `--detach` to `docker run`.
-# -r - Ref to check out and deploy, `master` by default.
+# -r - Ref to check out and deploy.
 # -q - Quit without attempting to log into the deploy host. This is a guard
 #      flag for internal use against looping indefinitely.
 
@@ -21,7 +21,6 @@ function err {
 }
 
 function parse_options {
-    REF=master
     DETACH="-d"
     
     while getopts "fr:q" OPT; do
