@@ -79,7 +79,7 @@ if [[ $(hostname) != "$DEPLOY_HOST" ]]; then
     }
 
     msg "Copying deployment scripts to $DEPLOY_HOST"
-    rsync -aP $DEPLOY_FILES $DEPLOY_HOST:$DEPLOY_DIR/$DEPLOY_FILES_DIR || exit 1
+    rsync -aLP $DEPLOY_FILES $DEPLOY_HOST:$DEPLOY_DIR/$DEPLOY_FILES_DIR || exit 1
     
     msg "Logging in to deploy host"
     ssh -A $DEPLOY_HOST -- bash -c \
