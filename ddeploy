@@ -33,8 +33,24 @@ function parse_options {
     done    
 }
 
+function create_envfile {    
+    echo -n > "$1"
+    
+    for SERVICE in $(get_services); do
+        for KEY in $(get_service_conf_keys "services.$SERVICE"); do
+            VAL=$(get_service_field $SERVICE $KEY)
+            [[ -n "$VAL" ]] && echo "${SERVICE}_${KEY}=${VAL}" >> "$1"
+        done
+    done
+}
+
 function get_services {
-    yq '."x-service-conf".services | keys' < "$COMPOSEFILE" | egrep '"\w+"' | cut -f2 -d\"
+    get_service_conf_keys "services"
+}
+
+function get_service_conf_keys {
+    FIELD="$1"    
+    yq ".\"x-service-conf\".${FIELD} | keys" < "$COMPOSEFILE" | egrep '"\w+"' | cut -f2 -d\"
 }
 
 function get_service_field {
@@ -66,6 +82,8 @@ if [[ -z "$DEPLOY_DIR" ]]; then
         err "Deploy host name not configured in $COMPOSEFILE"
     [[ -z "$DEPLOY_WORKDIR" ]] && \
         err "Deployment working directory name not configured in $COMPOSEFILE"
+    
+    create_envfile "$ENVFILE"
     
     # Copy deploy infrastructure files to the deploy host
     
