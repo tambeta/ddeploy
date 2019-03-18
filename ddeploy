@@ -1,15 +1,16 @@
 #!/usr/bin/env bash
 
-# A tool for deploying an application to a remote host in a Docker
-# container, according to a configuration provided in a `ddeployrc` file
-# (optionally prefixed with a dot `.`). See README.md for details.
+# A tool for deploying an application to a remote host in Docker
+# containers, according to the configuration provided in a `docker-
+# compose.yml` file. See README.md for details.
 #
 # Options:
 #
-# -f - Foreground mode: do not pass `--detach` to `docker run`.
-# -r - Ref to check out and deploy.
-# -q - Quit without attempting to log into the deploy host. This is a guard
-#      flag for internal use against looping indefinitely.
+# -f - Foreground mode: do not pass `--detach` to `docker-compose up`.
+# -d - Service deploy directory, passed automatically if invoked on the
+#      deploy host. For internal use, do not pass by hand.
+# -r - Ref to check out and deploy, passed automatically if invoked on the
+#      deploy host. For internal use, do not pass by hand.
 
 function msg {
     echo "==> $@" >&2
@@ -23,102 +24,91 @@ function err {
 function parse_options {
     DETACH="-d"
     
-    while getopts "fr:q" OPT; do
+    while getopts "fd:r:" OPT; do
         case $OPT in
             f ) unset DETACH  ;;
-            r ) REF=$OPTARG  ;;
-            q ) QUIT=1 ;;
+            d ) DEPLOY_DIR=$OPTARG ;;
+            r ) REF=$OPTARG ;;
         esac
     done    
 }
 
-function get_rcfile {
-    for RCFILE in ddeployrc .ddeployrc; do
-        if [[ -f $RCFILE && -r $RCFILE ]]; then
-            echo $RCFILE
-            break
-        fi
-    done
+function get_services {
+    yq '."x-service-conf".services | keys' < "$COMPOSEFILE" | egrep '"\w+"' | cut -f2 -d\"
 }
 
-function source_rcfile {
-    [[ -z "$1" ]] && err "ddeployrc or .ddeployrc not found or not readable"
-    source "$1"
-}
-
-function validate_settings {
-    local REQUIRED=(
-        DEPLOY_HOST
-        DEPLOY_DIR
-        IMAGE_NAME
-        CONTAINER_NAME
-    )
+function get_service_field {
+    SERVICE="$1"
+    FIELD="$2"
     
-    for i in ${REQUIRED[@]}; do
-        [[ -z "${!i}" ]] && err "$i is required, but not set in .ddeployrc or ddeployrc"
-    done
+    yq -r ".\"x-service-conf\".services.${SERVICE}.${FIELD}" < "$COMPOSEFILE"
 }
 
-DEPLOY_FILES_DIR=".ddeploy"
-RCFILE=$(get_rcfile)
-
+COMPOSEFILE="docker-compose.yml"
 parse_options $@
-source_rcfile "$RCFILE"
-validate_settings
 
-if [[ $(hostname) != "$DEPLOY_HOST" ]]; then
+if [[ -z "$DEPLOY_DIR" ]]; then
 
     # Local host
     
-    DEPLOY_FILES="$0 Dockerfile $RCFILE $CONTAINER_RUNNER"
-    SELF_BASENAME=$(basename $0)
-
-    [[ -n "$QUIT" ]] && {
-        echo "-q[uit] passed, but not on $DEPLOY_HOST: exiting" >&2
-        exit 1
-    }
-
-    msg "Copying deployment scripts to $DEPLOY_HOST"
-    rsync -aLP $DEPLOY_FILES $DEPLOY_HOST:$DEPLOY_DIR/$DEPLOY_FILES_DIR || exit 1
+    [[ -r "$COMPOSEFILE" ]] || \
+        err "$COMPOSEFILE not found or not readable"
+    which yq &> /dev/null || \
+        err "yq not found, but a dependency of $SELF_BASENAME"
     
-    msg "Logging in to deploy host"
-    ssh -A $DEPLOY_HOST -- bash -c \
-        "\"cd $DEPLOY_DIR/$DEPLOY_FILES_DIR && ./$SELF_BASENAME -q $*\"" \
-        ||  exit 1
+    ENVFILE=".env"
+    SELF_BASENAME=$(basename $0)
+    DEPLOY_HOST=$(yq -r '."x-service-conf".deploy_host' < "$COMPOSEFILE")
+    DEPLOY_WORKDIR=$(yq -r '."x-service-conf".deploy_workdir' < "$COMPOSEFILE")
+    DEPLOY_FILES="$0 $ENVFILE $COMPOSEFILE"
+
+    [[ -z "$DEPLOY_HOST" ]] && \
+        err "Deploy host name not configured in $COMPOSEFILE"
+    [[ -z "$DEPLOY_WORKDIR" ]] && \
+        err "Deployment working directory name not configured in $COMPOSEFILE"
+    
+    # Copy deploy infrastructure files to the deploy host
+    
+    msg "Copying deployment scripts to $DEPLOY_HOST"
+    ssh $DEPLOY_HOST "mkdir -p $DEPLOY_WORKDIR" || exit 1
+    rsync -aLP $DEPLOY_FILES $DEPLOY_HOST:$DEPLOY_WORKDIR || exit 1
+    
+    # For each service, fetch and check out the configured ref on the
+    # deploy host
+    
+    for SERVICE in $(get_services); do        
+        SVC_DEPLOY_DIR=$(get_service_field $SERVICE deploy_dir)
+        SVC_REF=$(get_service_field $SERVICE ref)
+        
+        if [[ -z "$SVC_REF" ]]; then
+            msg "No ref provided for $SERVICE, skipping checkout"
+            continue
+        fi
+        
+        msg "Fetching and checking out $SVC_REF on $DEPLOY_HOST"
+        ssh -A $DEPLOY_HOST \
+            "cd $DEPLOY_WORKDIR && ./$SELF_BASENAME -d $SVC_DEPLOY_DIR -r $SVC_REF" \
+            ||  exit 1
+    done
+
+    # Bring up the app on the deploy host
+    
+    msg "Running the app on $DEPLOY_HOST"
+    ssh $DEPLOY_HOST "cd $DEPLOY_WORKDIR && sudo -E docker-compose up --build"
 else
 
-    # Deploy host
+    # Assume we're on the deploy host: fetch and check out the passed ref
+    # for a service
 
-    CONTAINER_DIR=${CONTAINER_DIR:-/opt/$CONTAINER_NAME}
-    CONTAINER_PORT_CONF=${CONTAINER_PORT_MAP:+\
-        -p 127.0.0.1:$CONTAINER_PORT_MAP}
-        
-    if [[ -n "$CONTAINER_RUNNER" ]]; then
-        CONTAINER_RUNNER_ABS=${CONTAINER_RUNNER:+\
-            $CONTAINER_DIR/$DEPLOY_FILES_DIR/$CONTAINER_RUNNER}
-        CMD=${CONTAINER_RUNNER_ABS:+"$CONTAINER_RUNNER_ABS $CONTAINER_DIR"}
-    else
-        CMD="$CONTAINER_CMD"
+    [[ -z "$REF" ]] && err \
+        '`-d` also requires a ref to be passed via `-r`'
+
+    cd "$DEPLOY_DIR" && git fetch && git checkout $REF || exit 1
+    TRACKING_BRANCH=$(git rev-parse --abbrev-ref --symbolic-full-name @{u} 2>/dev/null)
+    
+    if [[ -n "$TRACKING_BRANCH" ]]; then
+        git merge "$TRACKING_BRANCH" || exit 1
     fi
-    
-    msg "Fetching and checking out $REF"
-    pushd $DEPLOY_DIR > /dev/null || exit 1
-    git fetch && git checkout $REF && git merge || exit 1
-    popd > /dev/null
-    
-    msg "Building container"
-    sudo docker build --build-arg=INSTALL_DIR="$CONTAINER_DIR" \
-        -t $IMAGE_NAME . || exit 1
-
-    msg "Stopping / removing $CONTAINER_NAME" >&2
-    sudo docker stop $CONTAINER_NAME && sudo docker rm $CONTAINER_NAME
-
-    msg "Starting container" >&2
-    sudo docker run --restart unless-stopped --name=$CONTAINER_NAME \
-        $CONTAINER_PORT_CONF $DETACH -t -v $DEPLOY_DIR:$CONTAINER_DIR \
-        --log-driver json-file --log-opt max-size=100m $IMAGE_NAME \
-        $CMD
         
     exit $?
 fi
-
