@@ -1,0 +1,58 @@
+version: "3.4"
+
+x-ddeploy-conf:
+
+  deploy_host: "example.com"
+  deploy_workdir: "/var/dockers/next/ddeploy"
+  services:
+    quux_next:
+      deploy_dir: "/var/dockers/next/quux-next"
+      ref: ""
+    graphql_server:
+      deploy_dir: "/var/dockers/next/graphql-server"
+      ref: ""
+
+services:
+
+  quux_next:
+    build:
+      context: "${quux_next_deploy_dir}/deploy"
+      args:
+        INSTALL_DIR: "/opt/quux-next"
+    command: "/opt/quux-next/deploy/run"
+    container_name: "quux-next"
+    image: "quux/next"
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+    ports:
+      - "127.0.0.1:5070:8080"
+    restart: "unless-stopped"
+    volumes:
+      - "${quux_next_deploy_dir}:/opt/quux-next"
+
+  graphql_server:
+    build:
+      context: "${graphql_server_deploy_dir}"
+      args:
+        INSTALL_DIR: "/opt/graphql-server"
+    command: "./server.py"
+    container_name: "quux-next-graphql-server"
+    image: "quux/next-graphql-server"
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+    ports:
+      - "127.0.0.1:5071:8090"
+    restart: "unless-stopped"
+    volumes:
+      - "${graphql_server_deploy_dir}:/opt/graphql-server"
+
+  mongo:
+    container_name: "quux-next-mongo"
+    image: "mongo"
+    ports:
+      - "27017"
+

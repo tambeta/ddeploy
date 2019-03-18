@@ -50,14 +50,14 @@ function get_services {
 
 function get_service_conf_keys {
     FIELD="$1"    
-    yq ".\"x-service-conf\".${FIELD} | keys" < "$COMPOSEFILE" | egrep '"\w+"' | cut -f2 -d\"
+    yq ".\"x-ddeploy-conf\".${FIELD} | keys" < "$COMPOSEFILE" | egrep '"\w+"' | cut -f2 -d\"
 }
 
 function get_service_field {
     SERVICE="$1"
     FIELD="$2"
     
-    yq -r ".\"x-service-conf\".services.${SERVICE}.${FIELD}" < "$COMPOSEFILE"
+    yq -r ".\"x-ddeploy-conf\".services.${SERVICE}.${FIELD}" < "$COMPOSEFILE"
 }
 
 COMPOSEFILE="docker-compose.yml"
@@ -74,8 +74,8 @@ if [[ -z "$DEPLOY_DIR" ]]; then
     
     ENVFILE=".env"
     SELF_BASENAME=$(basename $0)
-    DEPLOY_HOST=$(yq -r '."x-service-conf".deploy_host' < "$COMPOSEFILE")
-    DEPLOY_WORKDIR=$(yq -r '."x-service-conf".deploy_workdir' < "$COMPOSEFILE")
+    DEPLOY_HOST=$(yq -r '."x-ddeploy-conf".deploy_host' < "$COMPOSEFILE")
+    DEPLOY_WORKDIR=$(yq -r '."x-ddeploy-conf".deploy_workdir' < "$COMPOSEFILE")
     DEPLOY_FILES="$0 $ENVFILE $COMPOSEFILE"
 
     [[ -z "$DEPLOY_HOST" ]] && \
@@ -112,7 +112,7 @@ if [[ -z "$DEPLOY_DIR" ]]; then
     # Bring up the app on the deploy host
     
     msg "Running the app on $DEPLOY_HOST"
-    ssh $DEPLOY_HOST "cd $DEPLOY_WORKDIR && sudo -E docker-compose up --build"
+    ssh $DEPLOY_HOST "cd $DEPLOY_WORKDIR && sudo -E docker-compose up $DETACH --build"
 else
 
     # Assume we're on the deploy host: fetch and check out the passed ref
