@@ -4,6 +4,8 @@ A tool for deploying an application from a Git repository to a remote host using
 [Docker Compose](https://docs.docker.com/compose/), according to a configuration
 provided in a `docker-compose.yml` file.  Run `ddeploy` in a directory
 containing the configuration file to make the magic happen.
+[yq](https://github.com/kislyuk/yq/) is the only dependency besides standard
+GNU tools.
 
 ## Configuration
 
